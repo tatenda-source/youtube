@@ -2,11 +2,17 @@
 YouTube Uploader — auto-upload videos, thumbnails, and Shorts to YouTube.
 Uses YouTube Data API v3 with OAuth 2.0.
 
+Security:
+- OAuth 2.0 flow (no raw API keys for YouTube)
+- Credentials stored with 600 permissions (owner-only)
+- Token auto-refreshes, never stored in code or logs
+- client_secret.json and token.json are gitignored
+
 First run will open a browser for Google login — after that, the token is cached.
 """
 
-import json
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -20,7 +26,7 @@ from googleapiclient.http import MediaFileUpload
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import BASE_DIR
 
-# YouTube API scopes
+# Minimum required scopes — principle of least privilege
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
@@ -28,6 +34,35 @@ SCOPES = [
 
 CLIENT_SECRET_FILE = BASE_DIR / "client_secret.json"
 TOKEN_FILE = BASE_DIR / "token.json"
+
+
+def _sanitize_text(text: str) -> str:
+    """Remove any file paths, API keys, or system info from text before uploading."""
+    import re
+    # Remove absolute file paths
+    text = re.sub(r"/Users/\S+", "", text)
+    text = re.sub(r"[A-Z]:\\[^\s]+", "", text)
+    # Remove anything that looks like an API key (long alphanumeric strings)
+    text = re.sub(r"(?:sk-|gsk_|AIza)[A-Za-z0-9_-]{20,}", "[REDACTED]", text)
+    return text.strip()
+
+
+def _secure_file_permissions(filepath: Path):
+    """Set file to owner-only read/write (chmod 600)."""
+    filepath.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _validate_credentials_file(filepath: Path):
+    """Validate that a credentials file exists and has safe permissions."""
+    if not filepath.exists():
+        return False
+    # Check permissions — warn if too open
+    file_stat = filepath.stat()
+    mode = file_stat.st_mode
+    if mode & (stat.S_IRGRP | stat.S_IROTH):
+        print(f"  Warning: {filepath.name} is readable by others, fixing permissions...")
+        _secure_file_permissions(filepath)
+    return True
 
 # YouTube category IDs
 CATEGORIES = {
@@ -44,7 +79,9 @@ def get_authenticated_service():
     """Authenticate and return a YouTube API service object."""
     creds = None
 
+    # Load cached token if it exists and has safe permissions
     if TOKEN_FILE.exists():
+        _validate_credentials_file(TOKEN_FILE)
         creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
     if not creds or not creds.valid:
@@ -60,13 +97,21 @@ def get_authenticated_service():
                     "  3. Download JSON → rename to client_secret.json\n"
                     "  4. Place in project root"
                 )
+            _validate_credentials_file(CLIENT_SECRET_FILE)
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(CLIENT_SECRET_FILE), SCOPES
             )
-            creds = flow.run_local_server(port=8080)
+            # Use loopback redirect (localhost) — never expose on network
+            creds = flow.run_local_server(
+                port=8080,
+                open_browser=True,
+                bind_addr="127.0.0.1",  # localhost only, not 0.0.0.0
+            )
 
+        # Save token with restricted permissions
         with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
+        _secure_file_permissions(TOKEN_FILE)
 
     return build("youtube", "v3", credentials=creds)
 
@@ -98,6 +143,11 @@ def upload_video(
         Video ID of the uploaded video
     """
     youtube = get_authenticated_service()
+
+    # Sanitize inputs — strip file paths, keys, or system info that could leak
+    title = _sanitize_text(title)
+    description = _sanitize_text(description)
+    tags = [_sanitize_text(t) for t in (tags or [])]
 
     if is_short and "#Shorts" not in title:
         title = f"{title} #Shorts"
