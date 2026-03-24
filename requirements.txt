@@ -1,0 +1,7 @@
+openai>=1.0.0
+moviepy>=1.0.3
+Pillow>=10.0.0
+requests>=2.31.0
+pydub>=0.25.1
+whisper-openai>=20231117
+python-dotenv>=1.0.0
