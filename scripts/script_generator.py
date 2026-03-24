@@ -24,6 +24,15 @@ mysteries, and rabbit hole content. You write scripts that are:
 
 You write for faceless YouTube channels with narration over stock footage.
 
+CRITICAL — visual_keywords rules:
+- Keywords are used to search Pexels.com for stock VIDEO footage
+- They MUST match the cultural/geographic context of the story
+- For African stories: use "Africa", "African village", "African landscape", "savanna", "African city" etc.
+- For Zimbabwe stories: use "Zimbabwe", "African prison", "African landscape", "savanna sunset", "African drums", "colonial Africa", "African market" etc.
+- NEVER use generic Western keywords for non-Western stories
+- Be specific: "prison cell bars" not just "prison", "dusty African road" not just "road"
+- Each section needs 2-3 keywords that a stock footage site would actually have
+
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown:
 {
   "title": "YouTube title (clickable but not clickbait)",

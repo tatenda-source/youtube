@@ -3,6 +3,7 @@ Stock Footage Sourcer — fetches relevant stock videos from Pexels API.
 Uses visual keywords from the script to find matching footage.
 """
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -113,22 +114,52 @@ def fetch_footage_for_section(keywords: list, section_idx: int, clips_per_sectio
     return downloaded
 
 
+def _detect_context(script: dict) -> list:
+    """Detect the cultural/geographic context from the script to guide footage search."""
+    full_text = json.dumps(script).lower()
+
+    # Check for African/Zimbabwean context
+    zim_keywords = ["zimbabwe", "rhodesia", "harare", "bulawayo", "masvingo",
+                    "mugabe", "nehanda", "chimurenga", "shona", "ndebele",
+                    "chikurubi", "gukurahundi", "chidumo", "masendeke"]
+    africa_keywords = ["africa", "african", "colonial", "colonizer", "tribe",
+                       "savanna", "sahara", "congo", "kenya", "nigeria"]
+
+    if any(kw in full_text for kw in zim_keywords):
+        return ["Zimbabwe Africa", "African landscape savanna", "African village",
+                "African city streets", "African prison", "colonial Africa"]
+    elif any(kw in full_text for kw in africa_keywords):
+        return ["Africa landscape", "African village", "African city",
+                "savanna sunset", "African market"]
+
+    # Default — general dark history context
+    return ["old documents archive", "historic building", "foggy landscape"]
+
+
 def fetch_all_footage(script: dict) -> dict:
     """Fetch stock footage for all sections of a script.
     Returns dict mapping section index to list of video paths.
     """
     footage_map = {}
 
-    # Fetch for hook — use visually interesting keywords, avoid generic dark clips
-    hook_keywords = ["old documents", "ancient ruins", "foggy forest"]
+    # Detect cultural context for better footage matching
+    context_keywords = _detect_context(script)
+    print(f"Detected context: {context_keywords[0].split()[0]}")
+
+    # Fetch for hook using context-appropriate keywords
     print("Fetching hook footage...")
-    footage_map[-1] = fetch_footage_for_section(hook_keywords, 0)
+    footage_map[-1] = fetch_footage_for_section(context_keywords[:3], 0)
 
     # Fetch for each section
     for i, section in enumerate(script.get("sections", [])):
         keywords = section.get("visual_keywords", [])
         if not keywords:
             keywords = [section.get("section_title", "history documentary")]
+
+        # If section keywords return nothing useful, supplement with context keywords
+        # This ensures African stories get African footage
+        keywords = keywords + [context_keywords[i % len(context_keywords)]]
+
         print(f"Fetching footage for section {i + 1}: {section.get('section_title', '')}...")
         footage_map[i] = fetch_footage_for_section(keywords, i + 1)
 
