@@ -196,8 +196,17 @@ def generate_tags(topic: str, search_data: dict = None) -> list:
                   "documentary", "rabbit hole", "conspiracy", "history"]
     tags.update(niche_tags)
 
+    # Clean tags — YouTube rejects special characters and angle brackets
+    cleaned_tags = set()
+    for tag in tags:
+        # Remove characters YouTube doesn't allow in tags
+        tag = re.sub(r'[<>]', '', tag)
+        tag = tag.strip().strip('"').strip("'")
+        if tag and len(tag) > 1 and len(tag) < 50:
+            cleaned_tags.add(tag)
+
     # YouTube allows max 500 chars total in tags
-    sorted_tags = sorted(tags, key=len)
+    sorted_tags = sorted(cleaned_tags, key=len)
     final_tags = []
     total_chars = 0
     for tag in sorted_tags:
