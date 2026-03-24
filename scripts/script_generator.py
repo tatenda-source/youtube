@@ -68,10 +68,29 @@ def _load_research(topic: str) -> str:
 
 
 def generate_script(topic: str, style: str = "documentary") -> dict:
-    """Generate a full video script from a topic using Groq."""
+    """Generate a full video script from a topic using Groq.
+
+    Automatically fact-checks every topic before writing:
+    1. Checks local research file (assets/zim_research.json)
+    2. Searches Wikipedia + DuckDuckGo for verified facts
+    3. Feeds verified facts into the script prompt
+    """
+    from scripts.fact_checker import research_topic
 
     target_words = TARGET_VIDEO_LENGTH_MINUTES * WORDS_PER_MINUTE
-    research = _load_research(topic)
+
+    # Step 1: Check local research (Zim stories, etc.)
+    local_research = _load_research(topic)
+
+    # Step 2: Auto-research online for ALL topics
+    online_research = ""
+    if not local_research:
+        print("  Fact-checking online sources...")
+        online_brief = research_topic(topic)
+        if online_brief:
+            online_research = f"\n\nVERIFIED FACTS FROM ONLINE SOURCES — base your script on these, do NOT make up details:\n{online_brief}"
+
+    research = local_research or online_research
 
     user_prompt = f"""Create a YouTube script about: {topic}
 
@@ -87,7 +106,8 @@ Remember:
 - Every section should end with something that makes viewers need to hear the next part
 - Include specific dates, names, and details for credibility
 - End with a mind-blowing conclusion or unresolved mystery
-- Do NOT invent facts — only use verified information
+- Do NOT invent facts — only use verified information from the sources above
+- If you're unsure about a detail, present it as "according to reports" or "some historians believe"
 
 Respond with ONLY the JSON object, no markdown code blocks."""
 
