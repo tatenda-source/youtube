@@ -1,6 +1,7 @@
 """
 Configuration for the Faceless YouTube Video Pipeline.
 Dark History / Rabbit Holes niche.
+ALL FREE — no paid APIs required.
 """
 
 import os
@@ -19,10 +20,9 @@ MUSIC_DIR = ASSETS_DIR / "music"
 STOCK_DIR = ASSETS_DIR / "stock_footage"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
-# ─── API Keys (set via environment variables) ───────────
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+# ─── API Keys (all free tier) ───────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # Free: https://aistudio.google.com/apikey
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # Free: https://www.pexels.com/api/
 
 # ─── Video Settings ─────────────────────────────────────
 VIDEO_WIDTH = 1920
@@ -36,13 +36,11 @@ SHORTS_HEIGHT = 1920
 SHORTS_FPS = 30
 
 # ─── Audio / TTS Settings ───────────────────────────────
-TTS_PROVIDER = "openai"  # "openai", "elevenlabs", "google"
-OPENAI_TTS_VOICE = "onyx"  # deep, dramatic — perfect for dark history
-OPENAI_TTS_MODEL = "tts-1-hd"
-ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam — deep narrator
+TTS_PROVIDER = "edge"  # "edge" (free, best quality), "google" (free fallback)
+EDGE_TTS_VOICE = "en-US-GuyNeural"  # deep male narrator — perfect for dark history
 
 # ─── Script Generation ──────────────────────────────────
-SCRIPT_MODEL = "gpt-4o"
+SCRIPT_MODEL = "gemini-2.0-flash"  # Free tier: 15 RPM
 NICHE = "dark_history_rabbit_holes"
 TARGET_VIDEO_LENGTH_MINUTES = 10  # aim for 8-15 min for algorithm
 WORDS_PER_MINUTE = 150  # narration pace

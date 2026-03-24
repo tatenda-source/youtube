@@ -1,71 +1,32 @@
 """
 Text-to-Speech Engine — converts narration scripts to audio.
-Supports OpenAI TTS, ElevenLabs, and Google TTS.
+Uses edge-tts (FREE, high quality Microsoft Edge voices) as primary.
+Google gTTS as fallback (also free).
 """
 
+import asyncio
 import sys
 from pathlib import Path
+
 from pydub import AudioSegment
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import (
-    AUDIO_DIR,
-    TTS_PROVIDER,
-    OPENAI_API_KEY,
-    OPENAI_TTS_VOICE,
-    OPENAI_TTS_MODEL,
-    ELEVENLABS_API_KEY,
-    ELEVENLABS_VOICE_ID,
-)
+from config import AUDIO_DIR, TTS_PROVIDER, EDGE_TTS_VOICE
 
 
-def tts_openai(text: str, output_path: Path, voice: str = None) -> Path:
-    """Generate speech using OpenAI TTS."""
-    from openai import OpenAI
+def tts_edge(text: str, output_path: Path, voice: str = None) -> Path:
+    """Generate speech using edge-tts (free, high quality)."""
+    import edge_tts
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    voice = voice or OPENAI_TTS_VOICE
-
-    response = client.audio.speech.create(
-        model=OPENAI_TTS_MODEL,
-        voice=voice,
-        input=text,
-        response_format="mp3",
-    )
-
+    voice = voice or EDGE_TTS_VOICE
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    response.stream_to_file(str(output_path))
-    return output_path
 
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(str(output_path))
 
-def tts_elevenlabs(text: str, output_path: Path, voice_id: str = None) -> Path:
-    """Generate speech using ElevenLabs API."""
-    import requests
-
-    voice_id = voice_id or ELEVENLABS_VOICE_ID
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "text": text,
-        "model_id": "eleven_monolingual_v1",
-        "voice_settings": {
-            "stability": 0.6,
-            "similarity_boost": 0.85,
-        },
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(response.content)
+    asyncio.run(_generate())
     return output_path
 
 
@@ -81,9 +42,20 @@ def tts_google(text: str, output_path: Path) -> Path:
 
 
 TTS_PROVIDERS = {
-    "openai": tts_openai,
-    "elevenlabs": tts_elevenlabs,
+    "edge": tts_edge,
     "google": tts_google,
+}
+
+# Available edge-tts voices for dark/narrator content:
+EDGE_VOICES = {
+    "guy": "en-US-GuyNeural",          # Deep male — best for dark history
+    "eric": "en-US-EricNeural",         # Authoritative male
+    "davis": "en-US-DavisNeural",       # Calm narrator
+    "tony": "en-US-TonyNeural",         # Dramatic male
+    "andrew": "en-US-AndrewNeural",     # Documentary style
+    "brian": "en-US-BrianNeural",       # News anchor style
+    "jenny": "en-US-JennyNeural",       # Female narrator
+    "aria": "en-US-AriaNeural",         # Female dramatic
 }
 
 
@@ -118,7 +90,7 @@ def combine_audio(audio_files: list, output_path: Path, pause_ms: int = 500) -> 
     pause = AudioSegment.silent(duration=pause_ms)
 
     for i, audio_file in enumerate(audio_files):
-        segment = AudioSegment.from_mp3(str(audio_file))
+        segment = AudioSegment.from_file(str(audio_file))
         combined += segment
         if i < len(audio_files) - 1:
             combined += pause

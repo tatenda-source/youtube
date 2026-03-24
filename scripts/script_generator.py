@@ -1,17 +1,17 @@
 """
 Script Generator — generates narration scripts for Dark History / Rabbit Hole videos.
-Uses OpenAI GPT-4o to create engaging, retention-optimized scripts.
+Uses Google Gemini (FREE) to create engaging, retention-optimized scripts.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
-from openai import OpenAI
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import OPENAI_API_KEY, SCRIPT_MODEL, TARGET_VIDEO_LENGTH_MINUTES, WORDS_PER_MINUTE
-
-client = OpenAI(api_key=OPENAI_API_KEY)
+from config import GEMINI_API_KEY, SCRIPT_MODEL, TARGET_VIDEO_LENGTH_MINUTES, WORDS_PER_MINUTE
 
 SYSTEM_PROMPT = """You are an expert YouTube scriptwriter specializing in dark history,
 mysteries, and rabbit hole content. You write scripts that are:
@@ -24,18 +24,17 @@ mysteries, and rabbit hole content. You write scripts that are:
 
 You write for faceless YouTube channels with narration over stock footage.
 
-OUTPUT FORMAT:
-Return a JSON object with:
+OUTPUT FORMAT — respond with ONLY valid JSON, no markdown:
 {
   "title": "YouTube title (clickable but not clickbait)",
   "description": "YouTube description with keywords",
-  "tags": ["tag1", "tag2", ...],
+  "tags": ["tag1", "tag2"],
   "hook": "The first 2 sentences — the hook that stops the scroll",
   "sections": [
     {
       "section_title": "Section name (not shown in video, for organization)",
       "narration": "The actual narration text for this section",
-      "visual_keywords": ["keyword1", "keyword2"] // for stock footage search
+      "visual_keywords": ["keyword1", "keyword2"]
     }
   ],
   "thumbnail_text": "Short punchy text for thumbnail (2-5 words)"
@@ -43,7 +42,7 @@ Return a JSON object with:
 
 
 def generate_script(topic: str, style: str = "documentary") -> dict:
-    """Generate a full video script from a topic."""
+    """Generate a full video script from a topic using Gemini."""
 
     target_words = TARGET_VIDEO_LENGTH_MINUTES * WORDS_PER_MINUTE
 
@@ -59,19 +58,40 @@ Remember:
 - Start with an absolute banger hook
 - Every section should end with something that makes viewers need to hear the next part
 - Include specific dates, names, and details for credibility
-- End with a mind-blowing conclusion or unresolved mystery"""
+- End with a mind-blowing conclusion or unresolved mystery
 
-    response = client.chat.completions.create(
-        model=SCRIPT_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
+Respond with ONLY the JSON object, no markdown code blocks."""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{SCRIPT_MODEL}:generateContent?key={GEMINI_API_KEY}"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": SYSTEM_PROMPT + "\n\n" + user_prompt}
+                ]
+            }
         ],
-        response_format={"type": "json_object"},
-        temperature=0.8,
-    )
+        "generationConfig": {
+            "temperature": 0.8,
+            "maxOutputTokens": 8192,
+            "responseMimeType": "application/json",
+        },
+    }
 
-    script = json.loads(response.choices[0].message.content)
+    response = requests.post(url, json=payload)
+    response.raise_for_status()
+
+    data = response.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+
+    # Clean up response — strip markdown code blocks if present
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+    script = json.loads(text)
     return script
 
 

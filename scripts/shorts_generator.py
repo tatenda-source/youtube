@@ -1,12 +1,15 @@
 """
 YouTube Shorts Generator — repurpose long-form content into 60s vertical clips.
 Extracts the hookiest parts of a script and renders 9:16 vertical video.
+ALL FREE — uses Gemini for extraction.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
+import requests
 from moviepy.editor import (
     AudioFileClip,
     CompositeVideoClip,
@@ -21,37 +24,52 @@ from config import (
     SHORTS_WIDTH,
     SHORTS_HEIGHT,
     SHORTS_FPS,
-    OPENAI_API_KEY,
+    GEMINI_API_KEY,
+    SCRIPT_MODEL,
     VIDEO_DIR,
     AUDIO_DIR,
 )
 
 
 def extract_hook_for_short(script: dict) -> dict:
-    """Extract the most engaging 45-60 seconds of content for a Short."""
-    from openai import OpenAI
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
+    """Extract the most engaging 45-60 seconds of content for a Short using Gemini."""
     full_text = script.get("hook", "") + "\n"
     for section in script.get("sections", [])[:3]:
         full_text += section.get("narration", "") + "\n"
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "system",
-                "content": """Extract the most hook-worthy 60-second segment from this script
-for a YouTube Short. Pick the section that would make someone stop scrolling.
-Return JSON: {"narration": "the 45-60 second narration", "visual_keywords": ["keyword1", "keyword2"]}""",
-            },
-            {"role": "user", "content": full_text},
-        ],
-        response_format={"type": "json_object"},
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{SCRIPT_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-    return json.loads(response.choices[0].message.content)
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": f"""Extract the most hook-worthy 60-second segment from this script
+for a YouTube Short. Pick the section that would make someone stop scrolling.
+Return ONLY valid JSON: {{"narration": "the 45-60 second narration", "visual_keywords": ["keyword1", "keyword2"]}}
+
+Script:
+{full_text}"""
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.7,
+            "responseMimeType": "application/json",
+        },
+    }
+
+    response = requests.post(url, json=payload)
+    response.raise_for_status()
+
+    data = response.json()
+    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+    return json.loads(text)
 
 
 def create_short(

@@ -1,7 +1,6 @@
 """
 Subtitle Generator — creates word-level timed subtitles.
-Uses OpenAI Whisper for precise word-level timestamps,
-or falls back to estimation from text.
+Uses estimation from text + audio duration (fully free, no API needed).
 """
 
 import json
@@ -9,41 +8,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import (
-    OPENAI_API_KEY,
-    SUBTITLE_DIR,
-    MAX_WORDS_PER_SUBTITLE,
-    WORDS_PER_MINUTE,
-)
-
-
-def transcribe_with_whisper(audio_path: Path) -> list:
-    """Use OpenAI Whisper API to get word-level timestamps."""
-    from openai import OpenAI
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    with open(audio_path, "rb") as f:
-        response = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
-            response_format="verbose_json",
-            timestamp_granularities=["word"],
-        )
-
-    words = []
-    for word_info in response.words:
-        words.append({
-            "word": word_info.word,
-            "start": word_info.start,
-            "end": word_info.end,
-        })
-    return words
+from config import SUBTITLE_DIR, MAX_WORDS_PER_SUBTITLE
 
 
 def estimate_timestamps(text: str, audio_duration: float) -> list:
-    """Estimate word timestamps when Whisper isn't available.
-    Simple linear distribution based on word count.
+    """Estimate word timestamps based on audio duration.
+    Distributes words evenly across the duration.
     """
     words_list = text.split()
     if not words_list:
@@ -108,19 +78,12 @@ def _format_srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def generate_subtitles(audio_path: Path, text: str = None, audio_duration: float = None) -> list:
-    """Generate subtitles — tries Whisper first, falls back to estimation."""
-    try:
-        print("  Transcribing with Whisper for precise timestamps...")
-        words = transcribe_with_whisper(audio_path)
-        print(f"  Got {len(words)} word timestamps from Whisper")
-    except Exception as e:
-        print(f"  Whisper failed ({e}), using estimation...")
-        if text is None or audio_duration is None:
-            raise ValueError("Need text and audio_duration for estimation fallback")
-        words = estimate_timestamps(text, audio_duration)
-
+def generate_subtitles(audio_path: Path, text: str, audio_duration: float) -> list:
+    """Generate subtitles using timestamp estimation."""
+    print("  Estimating subtitle timestamps...")
+    words = estimate_timestamps(text, audio_duration)
     subtitles = group_words_into_subtitles(words)
+    print(f"  Generated {len(subtitles)} subtitle groups")
     return subtitles
 
 
@@ -137,7 +100,6 @@ def save_subtitles(subtitles: list, output_path: Path) -> Path:
 
 
 if __name__ == "__main__":
-    # Test with estimation
     test_text = "In 1959 nine hikers ventured into the Ural Mountains. None of them came back alive. What happened on that mountain remains one of history's greatest unsolved mysteries."
     subs = group_words_into_subtitles(
         estimate_timestamps(test_text, 15.0)
