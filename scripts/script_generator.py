@@ -41,10 +41,37 @@ OUTPUT FORMAT — respond with ONLY valid JSON, no markdown:
 }"""
 
 
+def _load_research(topic: str) -> str:
+    """Check if we have researched facts for this topic."""
+    research_file = Path(__file__).parent.parent / "assets" / "zim_research.json"
+    if not research_file.exists():
+        return ""
+
+    import json as _json
+    with open(research_file) as f:
+        research = _json.load(f)
+
+    topic_lower = topic.lower()
+    for key, data in research.items():
+        # Match if any keyword from the research key appears in the topic
+        key_words = key.replace("_", " ").split()
+        if any(word in topic_lower for word in key_words if len(word) > 3):
+            facts = data.get("key_facts", [])
+            hook = data.get("hook", "")
+            context = f"\n\nVERIFIED FACTS — use these as the basis for the script, do NOT make up details:\n"
+            if hook:
+                context += f"Suggested hook: {hook}\n"
+            context += "\n".join(f"- {f}" for f in facts)
+            return context
+
+    return ""
+
+
 def generate_script(topic: str, style: str = "documentary") -> dict:
     """Generate a full video script from a topic using Groq."""
 
     target_words = TARGET_VIDEO_LENGTH_MINUTES * WORDS_PER_MINUTE
+    research = _load_research(topic)
 
     user_prompt = f"""Create a YouTube script about: {topic}
 
@@ -53,12 +80,14 @@ Target length: ~{target_words} words of narration (about {TARGET_VIDEO_LENGTH_MI
 
 Break it into 6-10 sections. Each section should have its own mini-arc.
 Include visual keywords for each section so we can find matching stock footage.
+{research}
 
 Remember:
 - Start with an absolute banger hook
 - Every section should end with something that makes viewers need to hear the next part
 - Include specific dates, names, and details for credibility
 - End with a mind-blowing conclusion or unresolved mystery
+- Do NOT invent facts — only use verified information
 
 Respond with ONLY the JSON object, no markdown code blocks."""
 
