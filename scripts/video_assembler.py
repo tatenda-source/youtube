@@ -8,6 +8,7 @@ import random
 import sys
 from pathlib import Path
 
+import numpy as np
 from moviepy import (
     AudioFileClip,
     CompositeAudioClip,
@@ -17,6 +18,7 @@ from moviepy import (
     concatenate_videoclips,
     concatenate_audioclips,
     ColorClip,
+    vfx,
 )
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,6 +35,11 @@ from config import (
     SUBTITLE_POSITION,
 )
 
+# ─── Brightness settings ──────────────────────────────────
+BRIGHTNESS_THRESHOLD = 60       # clips below this mean brightness are "dark"
+BRIGHTNESS_SAMPLE_COUNT = 5     # number of frames to sample per clip
+BRIGHTNESS_BOOST_FACTOR = 2.5   # multiplier applied to dark clips that we keep
+
 
 def load_and_resize_clip(video_path: Path, target_duration: float) -> VideoFileClip:
     """Load a video clip, resize to target dimensions, and trim/loop to target duration."""
@@ -40,7 +47,6 @@ def load_and_resize_clip(video_path: Path, target_duration: float) -> VideoFileC
     clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
 
     if clip.duration > target_duration:
-        # Start from a random point for variety
         max_start = clip.duration - target_duration
         start = random.uniform(0, max(0, max_start))
         clip = clip.subclipped(start, start + target_duration)
@@ -51,17 +57,49 @@ def load_and_resize_clip(video_path: Path, target_duration: float) -> VideoFileC
     return clip
 
 
-def is_clip_too_dark(video_path: Path) -> bool:
-    """Check if a clip is too dark to use (nearly black footage)."""
+def measure_clip_brightness(video_path: Path) -> float:
+    """Measure average brightness of a clip by sampling multiple frames.
+
+    Returns the mean brightness across BRIGHTNESS_SAMPLE_COUNT evenly-spaced
+    frames.  Returns 0.0 on error so the clip can still be considered.
+    """
     try:
         clip = VideoFileClip(str(video_path))
-        # Sample a frame from the middle
-        frame = clip.get_frame(clip.duration / 2)
-        mean_brightness = frame.mean()
+        duration = clip.duration
+        if duration <= 0:
+            clip.close()
+            return 0.0
+
+        sample_times = [
+            duration * (i + 1) / (BRIGHTNESS_SAMPLE_COUNT + 1)
+            for i in range(BRIGHTNESS_SAMPLE_COUNT)
+        ]
+
+        brightness_values = []
+        for t in sample_times:
+            try:
+                frame = clip.get_frame(min(t, duration - 0.05))
+                brightness_values.append(float(frame.mean()))
+            except Exception:
+                pass
+
         clip.close()
-        return mean_brightness < 25  # reject very dark clips
+
+        if not brightness_values:
+            return 0.0
+        return sum(brightness_values) / len(brightness_values)
     except Exception:
-        return False
+        return 0.0
+
+
+def brighten_clip(clip):
+    """Apply a brightness boost to a dark clip using a pixel multiplier."""
+
+    def boost_image(frame):
+        boosted = frame.astype(np.float32) * BRIGHTNESS_BOOST_FACTOR
+        return np.clip(boosted, 0, 255).astype(np.uint8)
+
+    return clip.image_transform(boost_image)
 
 
 def create_footage_sequence(footage_files: list, total_duration: float):
@@ -73,19 +111,34 @@ def create_footage_sequence(footage_files: list, total_duration: float):
             duration=total_duration,
         )
 
-    # Filter out too-dark clips
-    usable = []
+    # ── Measure brightness of all clips ──────────────────
+    bright_clips = []
+    dark_clips = []
     for f in footage_files:
-        if not is_clip_too_dark(f):
-            usable.append(f)
+        brightness = measure_clip_brightness(f)
+        if brightness >= BRIGHTNESS_THRESHOLD:
+            bright_clips.append(f)
+            print(f"  OK  brightness={brightness:.0f}  {Path(f).name}")
         else:
-            print(f"  Skipping dark clip: {Path(f).name}")
+            dark_clips.append((f, brightness))
+            print(f"  DARK brightness={brightness:.0f}  {Path(f).name}")
 
-    if not usable:
-        usable = footage_files  # fallback to all if filter removes everything
+    # If enough bright clips, use only those; otherwise boost dark ones too
+    if len(bright_clips) >= 3:
+        usable = bright_clips
+        needs_boost = []
+        print(f"  Using {len(usable)} bright clips, skipping {len(dark_clips)} dark clips")
+    else:
+        # Not enough bright clips — boost the dark ones instead of skipping
+        usable = bright_clips
+        needs_boost = [f for f, _ in dark_clips]
+        usable += needs_boost
+        print(f"  Only {len(bright_clips)} bright clips — will brightness-boost {len(needs_boost)} dark clips")
 
-    # Use 5-10 second clips for a natural feel (not 81 x 3s choppy cuts)
-    target_clip_duration = 8.0  # seconds per clip
+    needs_boost_set = set(str(p) for p in needs_boost)
+
+    # Use 5-10 second clips for a natural feel
+    target_clip_duration = 8.0
     num_clips_needed = max(1, int(total_duration / target_clip_duration))
 
     # Pick clips evenly from available footage, with some randomness
@@ -96,7 +149,6 @@ def create_footage_sequence(footage_files: list, total_duration: float):
         if len(selected) >= num_clips_needed:
             break
 
-    # If we don't have enough, loop through again
     while len(selected) < num_clips_needed:
         selected.append(random.choice(usable))
 
@@ -107,6 +159,9 @@ def create_footage_sequence(footage_files: list, total_duration: float):
     for footage_path in selected:
         try:
             clip = load_and_resize_clip(footage_path, clip_duration)
+            # Apply brightness boost if this was a dark clip
+            if str(footage_path) in needs_boost_set:
+                clip = brighten_clip(clip)
             clips.append(clip)
         except Exception as e:
             print(f"  Warning: Failed to load {footage_path}: {e}")
@@ -121,9 +176,18 @@ def create_footage_sequence(footage_files: list, total_duration: float):
     return concatenate_videoclips(clips)
 
 
-def create_subtitle_clips(subtitles: list) -> list:
-    """Create TextClip overlays for each subtitle."""
+def create_subtitle_clips(subtitles: list, video_size: tuple = None) -> list:
+    """Create TextClip overlays for each subtitle.
+
+    MoviePy v2 notes:
+    - with_position(('center', 0.85), relative=True) is needed for fractional
+      positioning; without relative=True the float is treated as pixel offset.
+    - method='caption' wraps text within `size` width; 'label' does not wrap.
+    - font='Arial' works on macOS (system font).
+    """
     subtitle_clips = []
+    w = video_size[0] if video_size else VIDEO_WIDTH
+    h = video_size[1] if video_size else VIDEO_HEIGHT
 
     for sub in subtitles:
         duration = sub["end"] - sub["start"]
@@ -131,20 +195,30 @@ def create_subtitle_clips(subtitles: list) -> list:
             continue
 
         try:
-            pos = ("center", "center") if SUBTITLE_POSITION == "center" else ("center", 0.85)
+            # Determine position — always use relative=True for fractional coords
+            if SUBTITLE_POSITION == "center":
+                pos = ("center", "center")
+                relative = False
+            else:
+                # bottom-ish placement
+                pos = ("center", 0.82)
+                relative = True
+
             txt_clip = (
                 TextClip(
                     text=sub["text"],
                     font_size=SUBTITLE_FONT_SIZE,
                     color=SUBTITLE_FONT_COLOR,
+                    bg_color=None,                   # transparent background
                     stroke_color=SUBTITLE_STROKE_COLOR,
                     stroke_width=SUBTITLE_STROKE_WIDTH,
                     font="Arial",
                     method="caption",
-                    size=(VIDEO_WIDTH - 200, None),
+                    size=(w - 200, None),
                     text_align="center",
+                    transparent=True,
                 )
-                .with_position(pos)
+                .with_position(pos, relative=relative)
                 .with_start(sub["start"])
                 .with_duration(duration)
             )
@@ -176,10 +250,13 @@ def assemble_video(
 
     # Create subtitle overlays
     print("  Adding subtitles...")
-    subtitle_clips = create_subtitle_clips(subtitles)
+    subtitle_clips = create_subtitle_clips(subtitles, video_size=(VIDEO_WIDTH, VIDEO_HEIGHT))
 
-    # Composite video + subtitles
-    final_video = CompositeVideoClip([video] + subtitle_clips)
+    # Composite video + subtitles — explicitly set size
+    final_video = CompositeVideoClip(
+        [video] + subtitle_clips,
+        size=(VIDEO_WIDTH, VIDEO_HEIGHT),
+    )
 
     # Build audio track
     audio_tracks = [narration]
