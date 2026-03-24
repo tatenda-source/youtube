@@ -1,111 +1,136 @@
 """
-Thumbnail Generator — creates clickable YouTube thumbnails.
-Dark, dramatic style with bold text overlays.
+Thumbnail Generator — creates BRIGHT, high-contrast, clickable YouTube thumbnails.
+Uses stock footage frames as backgrounds with bold text overlays.
 """
 
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Optional, List
+
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_DIR, THUMBNAIL_FONT_SIZE
+from dotenv import load_dotenv; load_dotenv()
+from config import THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_DIR, THUMBNAIL_FONT_SIZE, STOCK_DIR
 
 
-def create_thumbnail(
-    text: str,
-    background_image_path: Path = None,
-    output_path: Path = None,
-    style: str = "dark_mystery",
-) -> Path:
-    """Create a YouTube thumbnail with text overlay."""
+# ─── Font config ──────────────────────────────────────────
+# Prefer Impact (the classic YouTube thumbnail font), fall back to Arial Bold
+_FONT_PATHS = [
+    "/System/Library/Fonts/Supplemental/Impact.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "arial.ttf",
+]
 
-    if background_image_path and Path(background_image_path).exists():
-        img = Image.open(background_image_path)
-        img = img.resize((THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), Image.LANCZOS)
-    else:
-        # Create a dark gradient background
-        img = _create_gradient_bg()
-
-    # Apply style
-    if style == "dark_mystery":
-        img = _apply_dark_style(img)
-    elif style == "red_alert":
-        img = _apply_red_style(img)
-
-    # Add text
-    img = _add_text_overlay(img, text)
-
-    # Add vignette
-    img = _add_vignette(img)
-
-    # Save
-    if output_path is None:
-        safe_name = text.replace(" ", "_")[:30].lower()
-        output_path = THUMBNAIL_DIR / f"thumb_{safe_name}.png"
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(output_path), quality=95)
-    print(f"  Thumbnail saved: {output_path}")
-    return output_path
+# Boost font size well beyond the config default for maximum impact
+_FONT_SIZE = max(THUMBNAIL_FONT_SIZE, 100)
 
 
-def _create_gradient_bg() -> Image.Image:
-    """Create a dark gradient background."""
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    """Load the best available bold font."""
+    for path in _FONT_PATHS:
+        try:
+            return ImageFont.truetype(path, size)
+        except (IOError, OSError):
+            continue
+    return ImageFont.load_default()
+
+
+# ─── Frame extraction ─────────────────────────────────────
+
+def extract_frame_from_video(video_path: Path, time_seconds: float = 1.0) -> Image.Image | None:
+    """Extract a single frame from a video file using ffmpeg."""
+    video_path = Path(video_path)
+    if not video_path.exists():
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", str(time_seconds),
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                tmp_path,
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+        if Path(tmp_path).exists() and Path(tmp_path).stat().st_size > 0:
+            img = Image.open(tmp_path).convert("RGB")
+            return img
+    except Exception:
+        pass
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    return None
+
+
+def _find_stock_clip(keywords: list[str]) -> Path | None:
+    """Find a stock footage clip matching any of the given keywords."""
+    if not STOCK_DIR.exists():
+        return None
+
+    clips = list(STOCK_DIR.glob("*.mp4"))
+    # Try each keyword
+    for kw in keywords:
+        kw_lower = kw.lower()
+        for clip in clips:
+            if kw_lower in clip.stem.lower():
+                return clip
+    # Fall back to first clip available
+    return clips[0] if clips else None
+
+
+# ─── Background generators ────────────────────────────────
+
+def _create_bold_gradient() -> Image.Image:
+    """Create a BRIGHT, bold gradient background (not dark)."""
     img = Image.new("RGB", (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT))
     draw = ImageDraw.Draw(img)
 
+    # Bold red-to-dark-orange gradient — eye-catching
     for y in range(THUMBNAIL_HEIGHT):
         ratio = y / THUMBNAIL_HEIGHT
-        r = int(20 + ratio * 30)
-        g = int(10 + ratio * 15)
-        b = int(30 + ratio * 40)
+        r = int(200 + ratio * 55)   # 200 → 255
+        g = int(30 + ratio * 60)    # 30 → 90
+        b = int(10 + ratio * 30)    # 10 → 40
         draw.line([(0, y), (THUMBNAIL_WIDTH, y)], fill=(r, g, b))
 
     return img
 
 
-def _apply_dark_style(img: Image.Image) -> Image.Image:
-    """Apply dark, moody color grading."""
+def _brighten_frame(img: Image.Image) -> Image.Image:
+    """Ensure a video frame is bright and vibrant enough for a thumbnail."""
+    # Boost brightness slightly
     enhancer = ImageEnhance.Brightness(img)
-    img = enhancer.enhance(0.5)
+    img = enhancer.enhance(1.15)
 
-    enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(1.4)
-
+    # Boost color saturation for vibrancy
     enhancer = ImageEnhance.Color(img)
-    img = enhancer.enhance(0.6)
+    img = enhancer.enhance(1.3)
+
+    # Increase contrast
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.2)
 
     return img
 
 
-def _apply_red_style(img: Image.Image) -> Image.Image:
-    """Apply red-tinted danger style."""
-    img = _apply_dark_style(img)
+# ─── Text rendering ───────────────────────────────────────
 
-    red_overlay = Image.new("RGB", img.size, (180, 20, 20))
-    img = Image.blend(img, red_overlay, 0.15)
-
-    return img
-
-
-def _add_text_overlay(img: Image.Image, text: str) -> Image.Image:
-    """Add bold text with outline to the thumbnail."""
-    draw = ImageDraw.Draw(img)
-
-    # Try to use a bold font, fall back to default
-    font_size = THUMBNAIL_FONT_SIZE
-    try:
-        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-    except (IOError, OSError):
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except (IOError, OSError):
-            font = ImageFont.load_default()
-
-    # Text wrapping
-    text = text.upper()
+def _wrap_text(draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    """Word-wrap text to fit within max_width pixels."""
     words = text.split()
     lines = []
     current_line = []
@@ -114,70 +139,156 @@ def _add_text_overlay(img: Image.Image, text: str) -> Image.Image:
         current_line.append(word)
         test_text = " ".join(current_line)
         bbox = draw.textbbox((0, 0), test_text, font=font)
-        if bbox[2] - bbox[0] > THUMBNAIL_WIDTH - 120:
+        if bbox[2] - bbox[0] > max_width:
             current_line.pop()
-            lines.append(" ".join(current_line))
+            if current_line:
+                lines.append(" ".join(current_line))
             current_line = [word]
     if current_line:
         lines.append(" ".join(current_line))
 
-    # Calculate total text height
-    line_height = font_size + 10
-    total_height = len(lines) * line_height
-    y_start = (THUMBNAIL_HEIGHT - total_height) // 2
+    return lines
 
-    # Draw text with outline
+
+def _add_text_overlay(img: Image.Image, text: str, text_color: str = "white") -> Image.Image:
+    """
+    Add LARGE bold text with thick black stroke onto the thumbnail.
+    A semi-transparent dark band is drawn behind the text area only,
+    ensuring readability over any background.
+    """
+    text = text.upper()
+    font = _load_font(_FONT_SIZE)
+
+    # We work on a copy
+    img = img.copy()
+    draw = ImageDraw.Draw(img)
+
+    # Wrap text
+    max_text_width = THUMBNAIL_WIDTH - 100  # 50px padding each side
+    lines = _wrap_text(draw, text, font, max_text_width)
+
+    # Measure text block
+    line_height = _FONT_SIZE + 14
+    total_text_height = len(lines) * line_height
+    y_start = (THUMBNAIL_HEIGHT - total_text_height) // 2
+
+    # ── Draw semi-transparent dark overlay behind text area only ──
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    pad_x, pad_y = 40, 30
+    overlay_draw.rounded_rectangle(
+        [
+            50 - pad_x,
+            y_start - pad_y,
+            THUMBNAIL_WIDTH - 50 + pad_x,
+            y_start + total_text_height + pad_y,
+        ],
+        radius=20,
+        fill=(0, 0, 0, 140),  # ~55% opacity black
+    )
+    img = img.convert("RGBA")
+    img = Image.alpha_composite(img, overlay)
+    img = img.convert("RGB")
+
+    # Redraw after compositing
+    draw = ImageDraw.Draw(img)
+
+    # Pick fill color
+    if text_color == "yellow":
+        fill = (255, 255, 0)
+    else:
+        fill = (255, 255, 255)
+
+    # Draw each line centered with thick black outline
+    outline_width = 6
     for i, line in enumerate(lines):
         bbox = draw.textbbox((0, 0), line, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (THUMBNAIL_WIDTH - text_width) // 2
+        text_w = bbox[2] - bbox[0]
+        x = (THUMBNAIL_WIDTH - text_w) // 2
         y = y_start + i * line_height
 
-        # Black outline
-        outline_width = 4
+        # Thick black stroke (all directions)
         for dx in range(-outline_width, outline_width + 1):
             for dy in range(-outline_width, outline_width + 1):
-                draw.text((x + dx, y + dy), line, fill=(0, 0, 0), font=font)
+                if dx * dx + dy * dy <= outline_width * outline_width:
+                    draw.text((x + dx, y + dy), line, fill=(0, 0, 0), font=font)
 
-        # Yellow/white text
-        draw.text((x, y), line, fill=(255, 255, 50), font=font)
+        # Bright fill
+        draw.text((x, y), line, fill=fill, font=font)
 
     return img
 
 
-def _add_vignette(img: Image.Image) -> Image.Image:
-    """Add a subtle vignette effect."""
-    vignette = Image.new("L", img.size, 0)
-    draw = ImageDraw.Draw(vignette)
+# ─── Public API ────────────────────────────────────────────
 
-    center_x = THUMBNAIL_WIDTH // 2
-    center_y = THUMBNAIL_HEIGHT // 2
-    max_radius = max(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
+def create_thumbnail(
+    text: str,
+    video_path: Path = None,
+    background_image_path: Path = None,
+    output_path: Path = None,
+    style: str = "bright",
+    text_color: str = "white",
+    stock_keywords: list[str] = None,
+) -> Path:
+    """
+    Create a bright, high-contrast YouTube thumbnail.
 
-    for i in range(max_radius, 0, -1):
-        brightness = int(255 * (i / max_radius))
-        draw.ellipse(
-            [center_x - i, center_y - i, center_x + i, center_y + i],
-            fill=brightness,
-        )
+    Priority for background:
+      1. video_path  — extract a frame from this video
+      2. stock_keywords — search assets/stock_footage/ for a matching clip
+      3. background_image_path — use a static image
+      4. Bold colored gradient fallback
+    """
 
-    vignette = vignette.filter(ImageFilter.GaussianBlur(radius=100))
+    img = None
 
-    # Apply vignette as alpha mask blend
-    img_array = img.copy()
-    black = Image.new("RGB", img.size, (0, 0, 0))
-    img_array = Image.composite(img_array, black, vignette)
+    # 1) Try extracting frame from explicit video path
+    if video_path and Path(video_path).exists():
+        img = extract_frame_from_video(video_path)
 
-    return img_array
+    # 2) Try finding a stock clip by keywords
+    if img is None and stock_keywords:
+        clip = _find_stock_clip(stock_keywords)
+        if clip:
+            img = extract_frame_from_video(clip)
 
+    # 3) Try static background image
+    if img is None and background_image_path and Path(background_image_path).exists():
+        img = Image.open(background_image_path).convert("RGB")
+
+    # 4) Fallback: bold gradient
+    if img is None:
+        img = _create_bold_gradient()
+
+    # Resize to thumbnail dimensions
+    img = img.resize((THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), Image.LANCZOS)
+
+    # Brighten & boost the background frame
+    if style != "gradient_only":
+        img = _brighten_frame(img)
+
+    # Add text overlay
+    img = _add_text_overlay(img, text, text_color=text_color)
+
+    # Determine output path
+    if output_path is None:
+        safe_name = text.replace(" ", "_")[:40].lower()
+        output_path = THUMBNAIL_DIR / f"{safe_name}_thumb.png"
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(output_path), quality=95)
+    print(f"  Thumbnail saved: {output_path}")
+    return output_path
+
+
+# ─── CLI / quick test ─────────────────────────────────────
 
 if __name__ == "__main__":
     create_thumbnail(
-        "They Never Came Back",
-        style="dark_mystery",
+        "DYATLOV PASS INCIDENT",
+        stock_keywords=["snowy", "winter_landscape", "mountain_peak", "mountain"],
+        output_path=THUMBNAIL_DIR / "the_dyatlov_pass_incident_thumb.png",
+        text_color="white",
     )
-    create_thumbnail(
-        "FORBIDDEN HISTORY",
-        style="red_alert",
-    )
-    print("Test thumbnails generated!")
+    print("Thumbnail generated!")
