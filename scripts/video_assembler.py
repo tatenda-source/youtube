@@ -4,6 +4,7 @@ Combines stock footage, narration audio, subtitles, and background music.
 Compatible with MoviePy v2.
 """
 
+import random
 import sys
 from pathlib import Path
 
@@ -39,12 +40,28 @@ def load_and_resize_clip(video_path: Path, target_duration: float) -> VideoFileC
     clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
 
     if clip.duration > target_duration:
-        clip = clip.subclipped(0, target_duration)
+        # Start from a random point for variety
+        max_start = clip.duration - target_duration
+        start = random.uniform(0, max(0, max_start))
+        clip = clip.subclipped(start, start + target_duration)
     elif clip.duration < target_duration:
         loops_needed = int(target_duration / clip.duration) + 1
         clip = concatenate_videoclips([clip] * loops_needed).subclipped(0, target_duration)
 
     return clip
+
+
+def is_clip_too_dark(video_path: Path) -> bool:
+    """Check if a clip is too dark to use (nearly black footage)."""
+    try:
+        clip = VideoFileClip(str(video_path))
+        # Sample a frame from the middle
+        frame = clip.get_frame(clip.duration / 2)
+        mean_brightness = frame.mean()
+        clip.close()
+        return mean_brightness < 25  # reject very dark clips
+    except Exception:
+        return False
 
 
 def create_footage_sequence(footage_files: list, total_duration: float):
@@ -56,10 +73,38 @@ def create_footage_sequence(footage_files: list, total_duration: float):
             duration=total_duration,
         )
 
-    clip_duration = total_duration / len(footage_files)
-    clips = []
+    # Filter out too-dark clips
+    usable = []
+    for f in footage_files:
+        if not is_clip_too_dark(f):
+            usable.append(f)
+        else:
+            print(f"  Skipping dark clip: {Path(f).name}")
 
-    for footage_path in footage_files:
+    if not usable:
+        usable = footage_files  # fallback to all if filter removes everything
+
+    # Use 5-10 second clips for a natural feel (not 81 x 3s choppy cuts)
+    target_clip_duration = 8.0  # seconds per clip
+    num_clips_needed = max(1, int(total_duration / target_clip_duration))
+
+    # Pick clips evenly from available footage, with some randomness
+    selected = []
+    step = max(1, len(usable) // num_clips_needed)
+    for i in range(0, len(usable), step):
+        selected.append(usable[i])
+        if len(selected) >= num_clips_needed:
+            break
+
+    # If we don't have enough, loop through again
+    while len(selected) < num_clips_needed:
+        selected.append(random.choice(usable))
+
+    clip_duration = total_duration / len(selected)
+    print(f"  Using {len(selected)} clips at ~{clip_duration:.1f}s each")
+
+    clips = []
+    for footage_path in selected:
         try:
             clip = load_and_resize_clip(footage_path, clip_duration)
             clips.append(clip)
@@ -68,7 +113,7 @@ def create_footage_sequence(footage_files: list, total_duration: float):
             clips.append(
                 ColorClip(
                     size=(VIDEO_WIDTH, VIDEO_HEIGHT),
-                    color=(10, 10, 10),
+                    color=(20, 20, 30),
                     duration=clip_duration,
                 )
             )

@@ -119,8 +119,8 @@ def fetch_all_footage(script: dict) -> dict:
     """
     footage_map = {}
 
-    # Fetch for hook
-    hook_keywords = ["mystery", "dark", "suspense"]
+    # Fetch for hook — use visually interesting keywords, avoid generic dark clips
+    hook_keywords = ["old documents", "ancient ruins", "foggy forest"]
     print("Fetching hook footage...")
     footage_map[-1] = fetch_footage_for_section(hook_keywords, 0)
 
