@@ -21,8 +21,9 @@ STOCK_DIR = ASSETS_DIR / "stock_footage"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
 # ─── API Keys (all free tier) ───────────────────────────
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # Free: https://aistudio.google.com/apikey
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # Free: https://www.pexels.com/api/
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")      # Free: https://console.groq.com/keys
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")   # Free: https://aistudio.google.com/apikey
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")   # Free: https://www.pexels.com/api/
 
 # ─── Video Settings ─────────────────────────────────────
 VIDEO_WIDTH = 1920
@@ -40,7 +41,7 @@ TTS_PROVIDER = "edge"  # "edge" (free, best quality), "google" (free fallback)
 EDGE_TTS_VOICE = "en-US-GuyNeural"  # deep male narrator — perfect for dark history
 
 # ─── Script Generation ──────────────────────────────────
-SCRIPT_MODEL = "gemini-2.0-flash"  # Free tier: 15 RPM
+SCRIPT_MODEL = "llama-3.3-70b-versatile"  # Groq free tier — fast + smart
 NICHE = "dark_history_rabbit_holes"
 TARGET_VIDEO_LENGTH_MINUTES = 10  # aim for 8-15 min for algorithm
 WORDS_PER_MINUTE = 150  # narration pace

@@ -1,17 +1,17 @@
 """
 Script Generator — generates narration scripts for Dark History / Rabbit Hole videos.
-Uses Google Gemini (FREE) to create engaging, retention-optimized scripts.
+Uses Groq (FREE) with Llama 3.3 70B for fast, high-quality scripts.
 """
 
 import json
-import re
 import sys
+import time
 from pathlib import Path
 
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import GEMINI_API_KEY, SCRIPT_MODEL, TARGET_VIDEO_LENGTH_MINUTES, WORDS_PER_MINUTE
+from config import GROQ_API_KEY, SCRIPT_MODEL, TARGET_VIDEO_LENGTH_MINUTES, WORDS_PER_MINUTE
 
 SYSTEM_PROMPT = """You are an expert YouTube scriptwriter specializing in dark history,
 mysteries, and rabbit hole content. You write scripts that are:
@@ -42,7 +42,7 @@ OUTPUT FORMAT — respond with ONLY valid JSON, no markdown:
 
 
 def generate_script(topic: str, style: str = "documentary") -> dict:
-    """Generate a full video script from a topic using Gemini."""
+    """Generate a full video script from a topic using Groq."""
 
     target_words = TARGET_VIDEO_LENGTH_MINUTES * WORDS_PER_MINUTE
 
@@ -62,34 +62,37 @@ Remember:
 
 Respond with ONLY the JSON object, no markdown code blocks."""
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{SCRIPT_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": SYSTEM_PROMPT + "\n\n" + user_prompt}
-                ]
-            }
+        "model": SCRIPT_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
         ],
-        "generationConfig": {
-            "temperature": 0.8,
-            "maxOutputTokens": 8192,
-            "responseMimeType": "application/json",
-        },
+        "temperature": 0.8,
+        "max_tokens": 8192,
+        "response_format": {"type": "json_object"},
     }
 
-    response = requests.post(url, json=payload)
-    response.raise_for_status()
+    # Retry with backoff for rate limits
+    for attempt in range(3):
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 429:
+            wait = 15 * (attempt + 1)
+            print(f"  Rate limited, waiting {wait}s (attempt {attempt + 1}/3)...")
+            time.sleep(wait)
+            continue
+        response.raise_for_status()
+        break
+    else:
+        raise Exception("Groq API rate limit — try again in a minute")
 
     data = response.json()
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-
-    # Clean up response — strip markdown code blocks if present
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
+    text = data["choices"][0]["message"]["content"]
 
     script = json.loads(text)
     return script

@@ -1,18 +1,20 @@
 """
 Video Assembler — stitches everything together into a final video.
 Combines stock footage, narration audio, subtitles, and background music.
+Compatible with MoviePy v2.
 """
 
 import sys
 from pathlib import Path
 
-from moviepy.editor import (
+from moviepy import (
     AudioFileClip,
     CompositeAudioClip,
     CompositeVideoClip,
     TextClip,
     VideoFileClip,
     concatenate_videoclips,
+    concatenate_audioclips,
     ColorClip,
 )
 
@@ -34,22 +36,20 @@ from config import (
 def load_and_resize_clip(video_path: Path, target_duration: float) -> VideoFileClip:
     """Load a video clip, resize to target dimensions, and trim/loop to target duration."""
     clip = VideoFileClip(str(video_path))
-    clip = clip.resize((VIDEO_WIDTH, VIDEO_HEIGHT))
+    clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
 
     if clip.duration > target_duration:
-        clip = clip.subclip(0, target_duration)
+        clip = clip.subclipped(0, target_duration)
     elif clip.duration < target_duration:
-        # Loop the clip to fill the duration
         loops_needed = int(target_duration / clip.duration) + 1
-        clip = concatenate_videoclips([clip] * loops_needed).subclip(0, target_duration)
+        clip = concatenate_videoclips([clip] * loops_needed).subclipped(0, target_duration)
 
     return clip
 
 
-def create_footage_sequence(footage_files: list, total_duration: float) -> VideoFileClip:
+def create_footage_sequence(footage_files: list, total_duration: float):
     """Create a sequence of stock footage clips that fills the total duration."""
     if not footage_files:
-        # Black screen fallback
         return ColorClip(
             size=(VIDEO_WIDTH, VIDEO_HEIGHT),
             color=(10, 10, 10),
@@ -73,7 +73,7 @@ def create_footage_sequence(footage_files: list, total_duration: float) -> Video
                 )
             )
 
-    return concatenate_videoclips(clips, method="compose")
+    return concatenate_videoclips(clips)
 
 
 def create_subtitle_clips(subtitles: list) -> list:
@@ -86,21 +86,22 @@ def create_subtitle_clips(subtitles: list) -> list:
             continue
 
         try:
+            pos = ("center", "center") if SUBTITLE_POSITION == "center" else ("center", 0.85)
             txt_clip = (
                 TextClip(
-                    sub["text"],
-                    fontsize=SUBTITLE_FONT_SIZE,
+                    text=sub["text"],
+                    font_size=SUBTITLE_FONT_SIZE,
                     color=SUBTITLE_FONT_COLOR,
                     stroke_color=SUBTITLE_STROKE_COLOR,
                     stroke_width=SUBTITLE_STROKE_WIDTH,
-                    font="Arial-Bold",
+                    font="Arial",
                     method="caption",
                     size=(VIDEO_WIDTH - 200, None),
-                    align="center",
+                    text_align="center",
                 )
-                .set_position(("center", "center" if SUBTITLE_POSITION == "center" else 0.85), relative=True if SUBTITLE_POSITION != "center" else False)
-                .set_start(sub["start"])
-                .set_duration(duration)
+                .with_position(pos)
+                .with_start(sub["start"])
+                .with_duration(duration)
             )
             subtitle_clips.append(txt_clip)
         except Exception as e:
@@ -140,16 +141,14 @@ def assemble_video(
     if bg_music_path and bg_music_path.exists():
         print("  Adding background music...")
         bg_music = AudioFileClip(str(bg_music_path))
-        # Loop music to fill duration
         if bg_music.duration < total_duration:
             loops = int(total_duration / bg_music.duration) + 1
-            from moviepy.editor import concatenate_audioclips
             bg_music = concatenate_audioclips([bg_music] * loops)
-        bg_music = bg_music.subclip(0, total_duration).volumex(BG_MUSIC_VOLUME)
+        bg_music = bg_music.subclipped(0, total_duration).with_volume_scaled(BG_MUSIC_VOLUME)
         audio_tracks.append(bg_music)
 
     final_audio = CompositeAudioClip(audio_tracks)
-    final_video = final_video.set_audio(final_audio)
+    final_video = final_video.with_audio(final_audio)
 
     # Render
     output_path = Path(output_path)
