@@ -4,10 +4,11 @@ Faceless YouTube Video Pipeline — Dark History / Rabbit Holes
 
 Usage:
     python pipeline.py "The Dyatlov Pass Incident"
-    python pipeline.py "MK Ultra CIA Mind Control" --style red_alert
-    python pipeline.py "The Lost Colony of Roanoke" --tts google --no-footage
+    python pipeline.py "MK Ultra CIA Mind Control" --upload
+    python pipeline.py "The Lost Colony of Roanoke" --upload --short
+    python pipeline.py "Unit 731" --upload --privacy unlisted --schedule "2026-03-26T15:00:00Z"
 
-One command: topic → finished video + thumbnail ready to upload.
+One command: topic → video → uploaded to YouTube.
 """
 
 import argparse
@@ -15,7 +16,6 @@ import json
 import sys
 from pathlib import Path
 
-# Ensure imports work
 sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
@@ -38,9 +38,13 @@ def slugify(text: str) -> str:
 def run_pipeline(
     topic: str,
     tts_provider: str = None,
-    thumbnail_style: str = "dark_mystery",
+    thumbnail_style: str = "bright",
     skip_footage: bool = False,
     skip_video: bool = False,
+    upload: bool = False,
+    upload_short: bool = False,
+    privacy: str = "public",
+    schedule: str = None,
 ):
     """Run the full video pipeline from topic to finished video."""
     slug = slugify(topic)
@@ -50,7 +54,7 @@ def run_pipeline(
     print("=" * 60)
 
     # ─── Step 1: Generate Script ────────────────────────────
-    print("\n[1/6] Generating script...")
+    print("\n[1/7] Generating script...")
     script = generate_script(topic)
     script_path = save_script(script, Path("output") / f"{slug}_script.json")
     narration = get_full_narration(script)
@@ -59,24 +63,22 @@ def run_pipeline(
     print(f"  Words: {word_count} | Sections: {len(script['sections'])}")
 
     # ─── Step 2: Generate Audio ─────────────────────────────
-    print("\n[2/6] Generating narration audio...")
+    print("\n[2/7] Generating narration audio...")
     audio_files = generate_section_audio(script["sections"], slug, tts_provider)
 
-    # Generate hook audio separately
     if script.get("hook"):
         hook_audio = AUDIO_DIR / f"{slug}_hook.mp3"
         generate_audio(script["hook"], hook_audio, tts_provider)
         audio_files.insert(0, hook_audio)
         print(f"  Generated audio: {hook_audio.name}")
 
-    # Combine all audio
     combined_audio = AUDIO_DIR / f"{slug}_full.mp3"
     combine_audio(audio_files, combined_audio)
     total_duration = get_audio_duration(combined_audio)
     print(f"  Total narration: {total_duration:.1f}s ({total_duration / 60:.1f} min)")
 
     # ─── Step 3: Generate Subtitles ─────────────────────────
-    print("\n[3/6] Generating subtitles...")
+    print("\n[3/7] Generating subtitles...")
     subtitles = generate_subtitles(combined_audio, narration, total_duration)
     sub_path = SUBTITLE_DIR / f"{slug}_subs"
     save_subtitles(subtitles, sub_path)
@@ -84,19 +86,17 @@ def run_pipeline(
     # ─── Step 4: Fetch Stock Footage ────────────────────────
     footage_files = []
     if not skip_footage:
-        print("\n[4/6] Fetching stock footage...")
+        print("\n[4/7] Fetching stock footage...")
         footage_map = fetch_all_footage(script)
-        # Flatten footage map to a list
         for section_idx in sorted(footage_map.keys()):
             footage_files.extend(footage_map[section_idx])
         print(f"  Total clips: {len(footage_files)}")
     else:
-        print("\n[4/6] Skipping footage (--no-footage)")
+        print("\n[4/7] Skipping footage (--no-footage)")
 
     # ─── Step 5: Assemble Video ─────────────────────────────
     if not skip_video:
-        print("\n[5/6] Assembling video...")
-        # Check for background music
+        print("\n[5/7] Assembling video...")
         bg_music = None
         music_files = list(MUSIC_DIR.glob("*.mp3"))
         if music_files:
@@ -112,19 +112,105 @@ def run_pipeline(
             bg_music_path=bg_music,
         )
     else:
-        print("\n[5/6] Skipping video assembly (--no-video)")
+        print("\n[5/7] Skipping video assembly (--no-video)")
         output_video = None
 
     # ─── Step 6: Generate Thumbnail ─────────────────────────
-    print("\n[6/6] Generating thumbnail...")
+    print("\n[6/7] Generating thumbnail...")
     thumb_text = script.get("thumbnail_text", topic[:30])
-    # Use first stock footage frame as background if available
-    thumb_bg = footage_files[0] if footage_files else None
+    stock_kw = ["mountain", "landscape", "snowy", "hiking", "forest"]
     thumbnail = create_thumbnail(
         text=thumb_text,
         output_path=THUMBNAIL_DIR / f"{slug}_thumb.png",
-        style=thumbnail_style,
+        stock_keywords=stock_kw,
     )
+
+    # ─── Step 6b: Generate Short ────────────────────────────
+    short_path = None
+    short_thumb = None
+    if upload_short and not skip_video:
+        print("\n[6b/7] Generating YouTube Short...")
+        try:
+            from scripts.shorts_generator import extract_hook_for_short, create_short
+            from scripts.subtitle_generator import estimate_timestamps, group_words_into_subtitles
+
+            hook_data = extract_hook_for_short(script)
+            short_narration = hook_data.get("narration", "")
+
+            short_audio = AUDIO_DIR / f"{slug}_short.mp3"
+            generate_audio(short_narration, short_audio, tts_provider)
+            short_duration = get_audio_duration(short_audio)
+
+            short_subs = group_words_into_subtitles(
+                estimate_timestamps(short_narration, short_duration)
+            )
+
+            # Pick bright footage
+            bright_footage = [f for f in footage_files
+                              if any(kw in str(f).lower() for kw in ["mountain", "landscape", "snowy", "hiking"])]
+            if not bright_footage:
+                bright_footage = footage_files[:6]
+
+            short_path = VIDEO_DIR / f"{slug}_short.mp4"
+            create_short(
+                audio_path=short_audio,
+                subtitles=short_subs,
+                footage_files=bright_footage[:6],
+                output_path=short_path,
+            )
+
+            short_thumb = THUMBNAIL_DIR / f"{slug}_short_thumb.png"
+            create_thumbnail(
+                text=thumb_text,
+                output_path=short_thumb,
+                stock_keywords=stock_kw,
+                text_color="yellow",
+            )
+        except Exception as e:
+            print(f"  Short generation failed: {e}")
+
+    # ─── Step 7: Upload to YouTube ──────────────────────────
+    uploaded = {}
+    if upload and output_video:
+        print("\n[7/7] Uploading to YouTube...")
+        try:
+            from scripts.youtube_uploader import upload_with_thumbnail
+
+            # Upload long-form
+            video_id = upload_with_thumbnail(
+                video_path=str(output_video),
+                thumbnail_path=str(thumbnail),
+                title=script["title"],
+                description=_build_description(script),
+                tags=script.get("tags", []),
+                privacy=privacy,
+                publish_at=schedule,
+            )
+            uploaded["video_id"] = video_id
+            uploaded["video_url"] = f"https://youtube.com/watch?v={video_id}"
+
+            # Upload Short
+            if short_path and short_path.exists():
+                print("\n  Uploading Short...")
+                short_title = script.get("thumbnail_text", topic[:30])
+                short_id = upload_with_thumbnail(
+                    video_path=str(short_path),
+                    thumbnail_path=str(short_thumb) if short_thumb else "",
+                    title=short_title,
+                    description=_build_description(script, is_short=True),
+                    tags=script.get("tags", []),
+                    privacy=privacy,
+                    is_short=True,
+                )
+                uploaded["short_id"] = short_id
+                uploaded["short_url"] = f"https://youtube.com/shorts/{short_id}"
+
+        except FileNotFoundError as e:
+            print(f"\n  Upload skipped: {e}")
+        except Exception as e:
+            print(f"\n  Upload failed: {e}")
+    else:
+        print("\n[7/7] Skipping upload (use --upload to auto-upload)")
 
     # ─── Summary ────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -136,13 +222,19 @@ def run_pipeline(
     print(f"  Subtitles: {sub_path}.srt")
     if output_video:
         print(f"  Video:     {output_video}")
+    if short_path:
+        print(f"  Short:     {short_path}")
     print(f"  Thumbnail: {thumbnail}")
     print(f"  Duration:  {total_duration / 60:.1f} min")
+    if uploaded.get("video_url"):
+        print(f"  YouTube:   {uploaded['video_url']}")
+    if uploaded.get("short_url"):
+        print(f"  Short:     {uploaded['short_url']}")
     print(f"\n  Description:\n  {script.get('description', 'N/A')}")
     print(f"\n  Tags: {', '.join(script.get('tags', []))}")
     print("=" * 60)
 
-    return {
+    result = {
         "title": script["title"],
         "description": script.get("description", ""),
         "tags": script.get("tags", []),
@@ -150,9 +242,29 @@ def run_pipeline(
         "audio_path": str(combined_audio),
         "subtitle_path": f"{sub_path}.srt",
         "video_path": str(output_video) if output_video else None,
+        "short_path": str(short_path) if short_path else None,
         "thumbnail_path": str(thumbnail),
         "duration_seconds": total_duration,
     }
+    result.update(uploaded)
+    return result
+
+
+def _build_description(script: dict, is_short: bool = False) -> str:
+    """Build a YouTube description with keywords and hashtags."""
+    desc = script.get("description", "")
+    tags = script.get("tags", [])
+    hashtags = " ".join(f"#{t.replace(' ', '')}" for t in tags[:5])
+
+    if is_short:
+        return f"{desc}\n\n{hashtags} #Shorts"
+
+    return (
+        f"{desc}\n\n"
+        f"{hashtags}\n\n"
+        f"---\n"
+        f"Subscribe for more dark history and unsolved mysteries."
+    )
 
 
 def main():
@@ -160,10 +272,14 @@ def main():
         description="Faceless YouTube Video Pipeline — Dark History / Rabbit Holes"
     )
     parser.add_argument("topic", help="Video topic (e.g., 'The Dyatlov Pass Incident')")
-    parser.add_argument("--tts", choices=["openai", "elevenlabs", "google"], help="TTS provider")
-    parser.add_argument("--style", choices=["dark_mystery", "red_alert"], default="dark_mystery", help="Thumbnail style")
+    parser.add_argument("--tts", choices=["edge", "google"], help="TTS provider")
+    parser.add_argument("--style", default="bright", help="Thumbnail style")
     parser.add_argument("--no-footage", action="store_true", help="Skip stock footage download")
-    parser.add_argument("--no-video", action="store_true", help="Skip video assembly (script + audio only)")
+    parser.add_argument("--no-video", action="store_true", help="Skip video assembly")
+    parser.add_argument("--upload", action="store_true", help="Auto-upload to YouTube")
+    parser.add_argument("--short", action="store_true", help="Also generate + upload a Short")
+    parser.add_argument("--privacy", choices=["public", "unlisted", "private"], default="public")
+    parser.add_argument("--schedule", help="Schedule publish (ISO 8601: 2026-03-25T15:00:00Z)")
 
     args = parser.parse_args()
 
@@ -173,6 +289,10 @@ def main():
         thumbnail_style=args.style,
         skip_footage=args.no_footage,
         skip_video=args.no_video,
+        upload=args.upload,
+        upload_short=args.short,
+        privacy=args.privacy,
+        schedule=args.schedule,
     )
 
 
