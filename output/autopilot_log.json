@@ -1,0 +1,50 @@
+[
+  {
+    "action": "video_produced",
+    "topic": "NASA Recorded Something Terrifying In Deep Space",
+    "status": "success",
+    "video_url": "https://youtube.com/watch?v=ukfF3q73yHM",
+    "short_url": "https://youtube.com/shorts/ZPVnbPP_HVA",
+    "timestamp": "2026-03-24T12:54:47.946668"
+  },
+  {
+    "action": "video_produced",
+    "topic": "The Town That Went Insane From Eating Bread",
+    "status": "success",
+    "video_url": "",
+    "short_url": "",
+    "timestamp": "2026-03-24T13:05:17.679936"
+  },
+  {
+    "action": "video_produced",
+    "topic": "Scientists Found Something Under Antarctica They Cant Explain",
+    "status": "success",
+    "video_url": "",
+    "short_url": "",
+    "timestamp": "2026-03-24T13:20:48.024261"
+  },
+  {
+    "action": "video_produced",
+    "topic": "She Found Her Husbands Secret Family After 15 Years",
+    "status": "success",
+    "video_url": "",
+    "short_url": "",
+    "timestamp": "2026-03-24T16:19:39.028269"
+  },
+  {
+    "action": "video_produced",
+    "topic": "He Gave His Best Friend Everything Then His Friend Took His Wife",
+    "status": "success",
+    "video_url": "",
+    "short_url": "",
+    "timestamp": "2026-03-24T16:29:46.777658"
+  },
+  {
+    "action": "video_produced",
+    "topic": "The Employee Who Destroyed a 2 Billion Dollar Company as Revenge",
+    "status": "success",
+    "video_url": "",
+    "short_url": "",
+    "timestamp": "2026-03-24T16:39:58.629542"
+  }
+]
