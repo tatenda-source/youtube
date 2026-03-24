@@ -54,16 +54,25 @@ def run_pipeline(
     print("=" * 60)
 
     # ─── Step 1: Generate Script ────────────────────────────
-    print("\n[1/7] Generating script...")
+    print("\n[1/8] Generating script...")
     script = generate_script(topic)
-    script_path = save_script(script, Path("output") / f"{slug}_script.json")
     narration = get_full_narration(script)
     word_count = len(narration.split())
     print(f"  Title: {script['title']}")
     print(f"  Words: {word_count} | Sections: {len(script['sections'])}")
 
+    # ─── Step 1b: SEO Optimization ───────────────────────────
+    print("\n[1b/8] SEO optimizing...")
+    try:
+        from scripts.seo_optimizer import optimize_script_seo
+        script = optimize_script_seo(script)
+    except Exception as e:
+        print(f"  SEO optimization skipped: {e}")
+
+    script_path = save_script(script, Path("output") / f"{slug}_script.json")
+
     # ─── Step 2: Generate Audio ─────────────────────────────
-    print("\n[2/7] Generating narration audio...")
+    print("\n[2/8] Generating narration audio...")
     audio_files = generate_section_audio(script["sections"], slug, tts_provider)
 
     if script.get("hook"):
