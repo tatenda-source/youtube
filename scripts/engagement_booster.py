@@ -105,11 +105,18 @@ def pin_comments_on_all_videos():
         title = video["snippet"]["title"]
 
         # Check if we already commented
-        comments = youtube.commentThreads().list(
-            part="snippet",
-            videoId=vid_id,
-            maxResults=5,
-        ).execute()
+        try:
+            comments = youtube.commentThreads().list(
+                part="snippet",
+                videoId=vid_id,
+                maxResults=5,
+            ).execute()
+        except Exception as e:
+            if "commentsDisabled" in str(e):
+                print(f"  Comments disabled: {title}")
+            else:
+                print(f"  Error checking comments on {title}: {e}")
+            continue
 
         already_commented = False
         channel_id = video["snippet"]["channelId"]
@@ -120,9 +127,12 @@ def pin_comments_on_all_videos():
                 break
 
         if not already_commented:
-            pin_comment_on_video(vid_id)
-            print(f"  Pinned comment on: {title}")
-            time.sleep(2)  # rate limit
+            try:
+                pin_comment_on_video(vid_id)
+                print(f"  Pinned comment on: {title}")
+                time.sleep(2)
+            except Exception as e:
+                print(f"  Failed to comment on {title}: {e}")
         else:
             print(f"  Already commented: {title}")
 

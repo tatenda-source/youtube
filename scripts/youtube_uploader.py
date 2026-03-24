@@ -30,6 +30,7 @@ from config import BASE_DIR
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 CLIENT_SECRET_FILE = BASE_DIR / "client_secret.json"
