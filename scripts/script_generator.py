@@ -13,8 +13,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import GROQ_API_KEY, SCRIPT_MODEL, TARGET_VIDEO_LENGTH_MINUTES, WORDS_PER_MINUTE
 
-SYSTEM_PROMPT = """You are an expert YouTube scriptwriter specializing in dark history,
-mysteries, and rabbit hole content. You write scripts that are:
+SYSTEM_PROMPT = """You are an expert YouTube scriptwriter specializing in betrayal stories,
+revenge narratives, dark history, and true stories that shock. You write scripts that are:
 
 - Hook-heavy: First 10 seconds must be impossible to skip
 - Conversational but authoritative — like a smart friend telling you something insane
