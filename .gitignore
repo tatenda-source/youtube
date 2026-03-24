@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+output/videos/*
+output/audio/*
+output/thumbnails/*
+output/subtitles/*
+assets/stock_footage/*
+assets/music/*
+assets/fonts/*
+!.gitkeep
